@@ -11,20 +11,18 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from datasets.dataset_synapse import Synapse_dataset
 from utils import test_single_volume
-# from networks.SCE_KV_SFF_RELFF import LaplacianFormer
-# from networks.SCE_KV_DEL_SCE import LaplacianFormer #best
-from networks.LGHF_DES import LaplacianFormer
+from networks.LGHF import LGHF
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--test_path', type=str,
-                    default= '/media/jxl/A8345C29345BF8B0/CYX/Laplacian-Former/data/synapse/test_vol_h5', help='root dir for validation volume data')  # for acdc volume_path=root_dir
+                    default= 'path/to/test_vol_h5', help='root dir for validation volume data')  # for acdc volume_path=root_dir
 parser.add_argument('--dataset', type=str,
                     default='Synapse', help='experiment_name')
 parser.add_argument('--num_classes', type=int,
                     default=9, help='output channel of network')
 parser.add_argument('--list_dir', type=str,
-                    default='/media/jxl/A8345C29345BF8B0/CYX/Laplacian-Former/lists/lists_Synapse', help='list dir')
+                    default='path/to/lists/lists_Synapse', help='list dir')
 parser.add_argument('--output_dir', type=str,
                     default='./result/', help='output dir')   
 parser.add_argument('--img_size', type=int, default=224, help='input patch size of network input')
@@ -32,12 +30,8 @@ parser.add_argument('--is_savenii', action="store_true", help='whether to save r
 parser.add_argument('--test_save_dir', type=str, default='../predictions', help='saving prediction as nii!')
 parser.add_argument('--deterministic', type=int,  default=1, help='whether use deterministic training')
 parser.add_argument('--seed', type=int, default=1234, help='random seed')
-# parser.add_argument('--pretrained_path', type=str,
-#                     default='/media/jxl/A8345C29345BF8B0/CYX/Laplacian-Former/model_out/DELSCE/DELSCE_epoch_587.pth', help='Pretrained model path') #best
 parser.add_argument('--pretrained_path', type=str,
-                    default='/media/jxl/A8345C29345BF8B0/CYX/Laplacian-Former/model_out/LGHF_2DES/LGHF_2DES_epoch_559.pth', help='Pretrained model path')
-# parser.add_argument('--pretrained_path', type=str,
-                    # default='/media/jxl/A8345C29345BF8B0/CYX/Laplacian-Former/model_out/DEL_RELFF/DEL_RELFF_epoch_587.pth', help='Pretrained model path')
+                    default='path/to/weight', help='Pretrained model path')
 parser.add_argument('--z_spacing', type=int,
                     default=1, help='z_spacing')
                     
@@ -95,8 +89,8 @@ if __name__ == "__main__":
     testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=1)
     
     # Loading model
-    model = LaplacianFormer(num_classes=9, pyramid_levels=4, n_skip_bridge=1).cuda()
+    model = LGHF(num_classes=9, pyramid_levels=4, n_skip_bridge=1).cuda()
     msg = model.load_state_dict(torch.load(args.pretrained_path)['model'])
-    print("Laplacian-Former Model: ", msg)
+    print("LGHF Model: ", msg)
 
     inference(args, testloader, model, test_save_path=(args.output_dir if args.is_savenii else None))

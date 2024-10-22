@@ -6,25 +6,21 @@ import random
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
-from networks.LGHF_DES import LaplacianFormer
-# from networks.shformer_main import shformer_add
-
-# from networks.LaplacianFormer_plan1 import LaplacianFormer
+from networks.LGHF import LGHF
 from trainer import trainer_synapse
 import warnings
-# from monai.networks.nets import UNet
 
 warnings.filterwarnings('ignore')
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--root_path', type=str,
-                    default='/media/jxl/A8345C29345BF8B0/CYX/Laplacian-Former/data/synapse/train_npz', help='root dir for data')
+                    default='path/to/train_npz', help='root dir for data')
 parser.add_argument('--test_path', type=str,
-                    default='/media/jxl/A8345C29345BF8B0/CYX/Laplacian-Former/data/synapse/test_vol_h5', help='root dir for data')
+                    default='path/to/test_vol_h5', help='root dir for data')
 parser.add_argument('--dataset', type=str,
                     default='Synapse', help='experiment_name')
 parser.add_argument('--list_dir', type=str,
-                    default='/media/jxl/A8345C29345BF8B0/CYX/Laplacian-Former/lists/lists_Synapse', help='list dir')
+                    default='path/to/lists/lists_Synapse', help='list dir')
 parser.add_argument('--dst_fast', action='store_true',
                     help='SynapseDatasetFast: will load all data into RAM')
 parser.add_argument('--num_classes', type=int,
@@ -35,7 +31,6 @@ parser.add_argument('--pyramid_levels', type=int,
                     default=4, help='Number of pyramid levels')
 parser.add_argument('--model_path', type=str,
                     default='./model_out/best_model.pth', help='model path')
-# parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
 parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
 
 parser.add_argument('--output_dir', type=str, 
@@ -94,17 +89,9 @@ if __name__ == "__main__":
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
-    
-    # net = shformer_add(num_classes=args.num_classes).to(device)
-    net = LaplacianFormer(num_classes=args.num_classes, n_skip_bridge=args.n_skip_bridge,
+
+    net = LGHF(num_classes=args.num_classes, n_skip_bridge=args.n_skip_bridge,
                         pyramid_levels=args.pyramid_levels).to(device)
-    # net = UNet(
-    #     spatial_dims=2,
-    #     in_channels=1,
-    #     out_channels=args.num_classes,
-    #     channels=(64, 128, 256, 512, 1024),
-    #     strides=(2, 2, 2, 2),
-    #     ).to(device)
 
     trainer = {'Synapse': trainer_synapse,}
     trainer[dataset_name](args, net, args.output_dir)
