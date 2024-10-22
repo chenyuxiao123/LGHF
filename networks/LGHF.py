@@ -1,8 +1,5 @@
 import torch
 import torch.nn as nn
-# import sys
-# sys.path.append('/media/luo/new/cyx/Laplacian-Former-main/networks')
-# from utils import *
 from networks.utils import *
 from typing import Tuple
 from einops import rearrange
@@ -41,20 +38,8 @@ class ConvBNReLU(nn.Module):
         x = self.relu(x)
         return x
 
-class LaplacianPyramidplan3(nn.Module):
+class HFF(nn.Module):
     def __init__(self, in_channels=64, pyramid_levels=3, dim=None):
-        """
-        Constructs a Laplacian pyramid from an input tensor.
-
-        Args:
-            in_channels    (int): Number of input channels.
-            pyramid_levels (int): Number of pyramid levels.
-        
-        Input: 
-            x : (B, in_channels, H, W)
-        Output:
-            Fused frequency attention map : (B, in_channels, in_channels)
-        """
         super().__init__()
         self.cat_liner = nn.Linear(2*dim, dim)
         self.in_channels = in_channels
@@ -82,13 +67,6 @@ class LaplacianPyramidplan3(nn.Module):
 
     def forward(self, x):
         G = x
-        # _, _, h, w = x.shape
-        # Level 1
-        # L0 = Rearrange('b d h w -> b d (h w)')(G)
-        # L0_att= F.softmax(L0, dim=2) @ L0.transpose(1, 2)  # L_k * L_v
-        # L0_att = F.softmax(L0_att, dim=-1)
-        
-        # Next Levels
         pyramid = [G]
         
         for kernel in self.sigma_kernels:
@@ -99,19 +77,12 @@ class LaplacianPyramidplan3(nn.Module):
         L_list = []
         for i in range(len(pyramid)-1):
             L_list.append(torch.sub(pyramid[i], pyramid[i+1]))
-        # spatial_att = self.spatial_attention(torch.cat(L_list,dim=1))  + 1
-        # context = L_list[0] * spatial_att[:, 0:1, :] + L_list[1] * spatial_att[:, 1:2, :] + L_list[2] * spatial_att[:, 2:3, :]
         context = L_list[0] + L_list[1] + L_list[2]
         context = Rearrange('b d h w -> b d (h w)')(context)
         att = F.softmax(context, dim=2) @ context.transpose(1, 2) 
         return att
        
 class DES(nn.Module):
-    """
-    Diversity-Enhanced Shortcut (DES) based on: "Gu et al.,
-    Multi-Scale High-Resolution Vision Transformer for Semantic Segmentation.
-    https://github.com/facebookresearch/HRViT
-    """
     def __init__(self, in_features, out_features, bias=True, act_func: nn.Module = nn.GELU):
         super().__init__()
         _, self.p = self._decompose(min(in_features, out_features))
@@ -141,19 +112,6 @@ class DES(nn.Module):
         return x
 
 class GeneralizedMeanPoolingBase(nn.Module):
-    r"""Applies a 2D power-average adaptive pooling over an input signal composed of several input planes.
-    The function computed is: :math:`f(X) = pow(sum(pow(X, p)), 1/p)`
-        - At p = infinity, one gets Max Pooling
-        - At p = 1, one gets Average Pooling
-    The output is of size H x W, for any input size.
-    The number of output features is equal to the number of input planes.
-    Args:
-        output_size: the target output size of the image of the form H x W.
-                     Can be a tuple (H, W) or a single H for a square image H x H
-                     H and W can be either a ``int``, or ``None`` which means the size will
-                     be the same as that of the input.
-    """
-
     def __init__(self, norm=3, output_size=1, eps=1e-6):
         super(GeneralizedMeanPoolingBase, self).__init__()
         assert norm > 0
@@ -166,11 +124,11 @@ class GeneralizedMeanPoolingBase(nn.Module):
     def forward(self, x):
         return (self.avg_pool(x ** self.p) + 1e-12) ** (1 / self.p)
 
-class SFF(nn.Module):
+class FIF(nn.Module):
     """FFM"""
 
     def __init__(self, low_channels = 128, high_channels = 128, out_channels = 256, norm_layer=nn.BatchNorm2d, **kwargs):
-        super(SFF, self).__init__()
+        super(FIF, self).__init__()
 
         self.conv_low = nn.Sequential(
             nn.Conv2d(low_channels, out_channels, 3,1,1, bias=False),
@@ -184,8 +142,6 @@ class SFF(nn.Module):
             nn.ReLU(True)
         )
 
-        # self.avg_pool = nn.AdaptiveMaxPool2d(1)
-        # self.avg_pool =  nn.AdaptiveMaxPool2d((1, 1))
         self.avg_pool = GeneralizedMeanPoolingBase(norm=3)
         k_size = 5
         self.conv_1 = nn.Conv1d(1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False)
@@ -196,9 +152,6 @@ class SFF(nn.Module):
 
         b,_,h,w = x_high.size()
         x_low = self.conv_low(x_low)
-        # x_low = F.interpolate(x_low, size=x_high.size()[2:], mode='bilinear', align_corners=True)
-        # x_low = F.interpolate(x_low, size=x_high.size()[2:], mode='nearest')
-
         x_high = self.conv_high(x_high)
 
         d  = torch.cat([self.avg_pool(x_low).unsqueeze(1), self.avg_pool(x_high).unsqueeze(1)],dim=1)
@@ -210,8 +163,6 @@ class SFF(nn.Module):
         d = self.conv_2(d.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1) # B 2C 1 1
 
         d = d.reshape(b, self.D, 2 , 1, 1).transpose(1, 2).transpose(0, 1) # 2 B C 1  1
-
-        # d = 1 + torch.tanh(d)
         d = torch.sigmoid(d) 
 
         x_fuse = d[0] * x_low + d[1] * x_high
@@ -240,19 +191,7 @@ class BiSeNetOutput(nn.Module):
                 nn.init.xavier_normal_(ly.weight)
                 if not ly.bias is None: nn.init.constant_(ly.bias, 0)
 
-class EfficientFrequencyAttention(nn.Module):
-    """
-    args:
-        in_channels:    (int) : Embedding Dimension.
-        key_channels:   (int) : Key Embedding Dimension,   Best: (in_channels).
-        value_channels: (int) : Value Embedding Dimension, Best: (in_channels or in_channels//2). 
-        pyramid_levels  (int) : Number of pyramid levels.
-    input:
-        x : [B, D, H, W]
-    output:
-        Efficient Attention : [B, D, H, W]
-    
-    """
+class Attention(nn.Module):
     
     def __init__(self, in_channels, key_channels, value_channels, pyramid_levels=3, heads=5):
         super().__init__()
@@ -262,8 +201,7 @@ class EfficientFrequencyAttention(nn.Module):
         self.reprojection = nn.Conv2d(value_channels, in_channels, 1)
         
         # Build a laplacian pyramid
-        self.freq_attention = LaplacianPyramidplan3(in_channels=in_channels, pyramid_levels=pyramid_levels, dim=in_channels) 
-        # self.freq_attention = LaplacianPyramid(in_channels=in_channels, pyramid_levels=pyramid_levels) 
+        self.freq_attention = HFF(in_channels=in_channels, pyramid_levels=pyramid_levels, dim=in_channels) 
         self.conv_dw = nn.Conv3d(in_channels, in_channels, kernel_size=(2, 1, 1), bias=False, groups=in_channels)
         #################
         self.heads = heads
@@ -273,7 +211,7 @@ class EfficientFrequencyAttention(nn.Module):
         self.pool_k = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
         self.act = nn.GELU()        
         self.pad = nn.ZeroPad2d(padding=(0,1,1,0))
-        self.sff = SFF(in_channels,in_channels,in_channels)
+        self.fif = FIF(in_channels,in_channels,in_channels)
         self.conv_out = BiSeNetOutput(in_channels, in_channels, in_channels, up_factor=1)
 
     def forward(self, x):
@@ -306,28 +244,19 @@ class EfficientFrequencyAttention(nn.Module):
         q_ = q_.permute(0,2,1)
         freq_context = self.freq_attention(shortcut)
         freq_attention = x + (freq_context.transpose(1, 2) @ q_).reshape(n, self.value_channels, h, w) 
-        f = self.sff(freq_attention,eff_attention)
+        f = self.fif(freq_attention,eff_attention)
         f = self.conv_out(f)
-
-
         return f
 
 
 
-class FrequencyTransformerBlock(nn.Module):
-    """
-        Input:
-            x : [b, (H*W), d], H, W
-            
-        Output:
-            mx : [b, (H*W), d]
-    """
+class FFATBlock(nn.Module):
     def __init__(self, in_dim, key_dim, value_dim, pyramid_levels=3, token_mlp='mix'):
         super().__init__()
         
         self.in_dim = in_dim 
         self.norm1 = nn.LayerNorm(in_dim)
-        self.attn = EfficientFrequencyAttention(in_channels=in_dim, key_channels=key_dim, value_channels=value_dim,
+        self.attn = Attention(in_channels=in_dim, key_channels=key_dim, value_channels=value_dim,
                                                 pyramid_levels=pyramid_levels)
         
         self.norm2 = nn.LayerNorm(in_dim)
@@ -383,7 +312,7 @@ class Encoder(nn.Module):
 
             # Transformer Blocks
             transformer_block = nn.ModuleList([
-                FrequencyTransformerBlock(out_channels, key_dim[i], value_dim[i], pyramid_levels, token_mlp)
+                FFATBlock(out_channels, key_dim[i], value_dim[i], pyramid_levels, token_mlp)
                 for _ in range(layers[i])
             ])
             self.blocks.append(transformer_block)
@@ -408,20 +337,6 @@ class Encoder(nn.Module):
 
 
 class EfficientAttentionScore(nn.Module):
-    """
-    args:
-        in_channels:    int -> Embedding Dimension 
-        key_channels:   int -> Key Embedding Dimension,   Best: (in_channels)
-        value_channels: int -> Value Embedding Dimension, Best: (in_channels or in_channels//2) 
-        
-    input:
-        x -> [B, D, H, W]
-    output:
-        x -> [B, D, D]
-    output:
-        keys -> [B, D, N(H*W)]
-        values -> [B, D, N(H*W)]
-    """
     
     def __init__(self, in_channels, key_channels, value_channels):
         super().__init__()
@@ -443,20 +358,6 @@ class EfficientAttentionScore(nn.Module):
     
 
 class EAS4(nn.Module):
-    """
-    args:
-        in_channels:    int -> Embedding Dimension 
-        key_channels:   int -> Key Embedding Dimension,   Best: (in_channels)
-        value_channels: int -> Value Embedding Dimension, Best: (in_channels or in_channels//2) 
-        
-    input:
-        x -> [B, D, H, W]
-    output:
-        x -> [B, D, D]
-    output:
-        keys -> [B, D, N(H*W)]
-        values -> [B, D, N(H*W)]
-    """
     
     def __init__(self, in_channels, key_channels, value_channels, focusing_factor=3, num_heads=1, in_dim=None):
         super().__init__()
@@ -506,13 +407,7 @@ class EAS4(nn.Module):
         z = 1 / (torch.einsum("b i c, b c -> b i", q, k.sum(dim=1)) + 1e-6)
         kv = torch.einsum("b j c, b j d -> b c d", k, v)
         x = torch.einsum("b i c, b c d, b i -> b i d", q, kv, z)
-        # if i * j * (c + d) > c * d * (i + j):
-        #     kv = torch.einsum("b j c, b j d -> b c d", k, v)
-        #     x = torch.einsum("b i c, b c d, b i -> b i d", q, kv, z)
-        # else:
-        #     qk = torch.einsum("b i c, b j c -> b i j", q, k)
-        #     x = torch.einsum("b i j, b j d, b i -> b i d", qk, v, z)
-        ###########################################################
+
         shortcut = Rearrange(f'b c h w -> b (h w) c', h=h, w=w)(shortcut)
         enhanced = shortcut + x
         out = enhanced + self.mlp(self.norm_mlp(enhanced), h, w)
@@ -558,7 +453,7 @@ class DecoderLayer(nn.Module):
         self.mlp = MixFFN_skip(dim, int(dim * 4))
         self.norm_mlp = nn.LayerNorm(dim)
         self.query_convs = nn.Conv2d(dim, dim, 1)
-        self.layer_former = nn.ModuleList([FrequencyTransformerBlock(dim, dim, dim, pyramid_levels,token_mlp_mode) for _ in range(2)])
+        self.layer_former = nn.ModuleList([FFATBlock(dim, dim, dim, pyramid_levels,token_mlp_mode) for _ in range(2)])
       
     def forward(self, low, left_q):
         B, _, _, C = low.shape
@@ -612,7 +507,7 @@ class Seg_Head(nn.Module):
         return result
 
     
-class LaplacianFormer(nn.Module):
+class LGHF(nn.Module):
     def __init__(self, num_classes=9,n_skip_bridge=1, pyramid_levels=3, token_mlp_mode="mix_skip"):
         super().__init__()
     
@@ -657,11 +552,7 @@ class LaplacianFormer(nn.Module):
 
         output_enc = self.encoder(x)
         out4 = output_enc[-1]
-        # bottle neck
         out_bot = self.bot_neck_layer(out4)
-        # Decoder
-        # b, _, _, c = out_bot.shape
-        # out_bot1 = out_bot.view(b,-1,c)
         out_dec3 = self.decoders3(out_bot, output_enc[2])
         out_dec2 = self.decoders2(out_dec3, output_enc[1])
         out_dec1 = self.decoders1(out_dec2, output_enc[0])
@@ -669,14 +560,3 @@ class LaplacianFormer(nn.Module):
         out = self.seg_head(out_dec1)
        
         return out
-if __name__ == '__main__':
-    model = LaplacianFormer(num_classes=9, n_skip_bridge=1,
-                        pyramid_levels=4).to(device)
-    from ptflops import get_model_complexity_info
-    macs, params=get_model_complexity_info(model, (3, 224, 224), as_strings=True, print_per_layer_stat=False, verbose=True)
-    print('{:<30} {:<8}'.format('Computational Complexity:', macs))
-    print('{:<30} {:<8}'.format('Number of parameters:', params))
-    input_tensor = torch.randn(1, 1, 224, 224).cuda()
-
-    P = model(input_tensor)
-    print(P[0].shape)
