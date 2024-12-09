@@ -33,15 +33,7 @@
 
 ## Test 
 
-1) Download the learned weights from the below link:
-
-    Dataset   | Model | Download link 
-    -----------|-------|----------------
-    Synapse   | LGHF   | [Download](https://drive.google.com/file/d/14NhQb56Efsp7Kl4W00t7kGY5t75tk8WV/view?usp=sharing)
-
-<br>
-
-2) Run the below code to test the model on the synapse dataset.
+1) Run the below code to test the model on the synapse dataset.
   
     
     ```python
